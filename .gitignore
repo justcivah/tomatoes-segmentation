@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Jupyter Notebook outputs
+*.ipynb
+
+# MLflow
+mlruns/
+mlflow.log
+mlflow-artifacts/
+mlflow.db
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# PyInstaller
+*.spec
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
