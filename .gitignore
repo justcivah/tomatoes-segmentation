@@ -12,9 +12,6 @@ env/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
-# Jupyter Notebook outputs
-*.ipynb
-
 # MLflow
 mlruns/
 mlflow.log
