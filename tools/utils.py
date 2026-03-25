@@ -60,7 +60,7 @@ def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple 
     test = ids[n_train + n_valid:]
 
     splits_dict = {'train': train, 'valid': valid, 'test': test}
-    with open(splits_output + 'splits.json', 'w') as f:
+    with open(os.path.join(splits_output, 'splits.json'), 'w') as f:
         json.dump(splits_dict, f, indent=4)
 
     return train, valid, test
