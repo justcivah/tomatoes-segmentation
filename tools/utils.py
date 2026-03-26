@@ -144,3 +144,23 @@ def bce_dice_loss(pred, target, alpha=0.5):
     dice = 1 - (2 * intersection + 1e-6) / (union + 1e-6)
     
     return alpha * bce + (1 - alpha) * dice.mean()
+
+class EarlyStop():
+    def __init__(self, patience=20, delta=0.001):
+        self.patience = patience
+        self.delta = delta
+        self.best_loss = float('inf')
+        self.count = 0
+
+    def stop(self, loss):
+        if loss < self.best_loss - self.delta:
+            self.best_loss = loss
+            self.count = 0
+        
+        else:
+            self.count += 1
+
+        if self.count > self.patience:
+            return True
+        
+        return False

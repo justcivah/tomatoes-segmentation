@@ -2,6 +2,7 @@ import torch
 import os
 from datetime import datetime
 import mlflow
+import tools.utils as utils
 from torchmetrics.classification import (
     BinaryF1Score,
     BinaryPrecision,
@@ -12,17 +13,23 @@ from torchmetrics.classification import (
 )
 
 class SimpleTrainer():
-    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, state=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
+    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, patience=None, state=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
         self.model = model
         self.train_loader = train_loader
         self.valid_loader = valid_loader
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.epochs = epochs
+        self.patience = patience
         self.state = state
         self.best_valid_loss = float('inf')
         self.metrics_threshold = metrics_threshold
         self.hparams = hparams or {}
+
+        if self.patience is not None:
+            if not isinstance(self.patience, int) or self.patience <= 0:
+                raise ValueError("early_stop must be an integer > 0 or None")
+
 
         # infer device from model parameters
         self.device = next(model.parameters()).device
@@ -33,6 +40,9 @@ class SimpleTrainer():
 
         os.makedirs(checkpoint_path, exist_ok=True)
         self.checkpoint_path = checkpoint_path
+
+        if self.patience is not None:
+            self.early_stop = utils.EarlyStop(patience=self.patience)
 
 
     def fit(self):
@@ -65,6 +75,11 @@ class SimpleTrainer():
                     self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'best_model.pt'))
                     print(f'new best model saved with valid loss {val_loss:.4f}')
 
+                if self.patience is not None:
+                    if self.early_stop.stop(val_loss):
+                        break
+
+
             self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'last_model.pt'))
 
 
@@ -80,12 +95,12 @@ class SimpleTrainer():
                 targets = targets.to(self.device)
 
                 outputs = self.model(inputs)
-                loss    = self.loss_fn(outputs, targets)
+                loss = self.loss_fn(outputs, targets)
                 running_loss += loss.item()
                 total_batches += 1
 
                 # converting into probabilities and then flattening to 1D
-                probs  = torch.sigmoid(outputs).view(-1)
+                probs = torch.sigmoid(outputs).view(-1)
                 labels = targets.long().view(-1)
 
                 preds = (probs >= self.metrics_threshold).long()

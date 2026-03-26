@@ -18,11 +18,12 @@ ds_path = '/home/giovanni/Desktop/agricultural-robotics/datasets/enhanced-tomato
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
 total_epochs = 500
-batch_size = 4
+batch_size = 16
 learning_rate = 5e-4
 curriculum = True
 augment=True
 dropout = 0.25
+patience=50
 # 0 = tomatoes
 target_category = 0
 
@@ -123,9 +124,10 @@ for m in models:
         "learning_rate": learning_rate,
         "batch_size": batch_size,
         "dropout": dropout_val,
+        "patience": patience,
         "augment": augment,
         "curriculum": curriculum,
-        "device": device,
+        "device": str(device),
     }
 
     run_name = f"{model_name}_{timestamp}"
@@ -139,6 +141,7 @@ for m in models:
         optimizer,
         loss_fn,
         total_epochs,
+        patience=patience,
         state=state,
         checkpoint_path=checkpoint_path,
         hparams=hparams,
