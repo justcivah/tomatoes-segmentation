@@ -17,6 +17,7 @@ def set_seed(seed=42):
     random.seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple = (0, 0, 0)):
@@ -68,7 +69,7 @@ def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple 
 
 def transformations(img, mask, width, height):
     transform = T.Compose([
-        T.Resize((width, height))
+        T.RandomCrop((width, height)),
     ])
 
     img, mask = transform(img, tv_tensors.Mask(mask))
