@@ -17,7 +17,7 @@ ds_path = '/home/giovanni/Desktop/agricultural-robotics/datasets/enhanced-tomato
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
 total_epochs = 500
-batch_size = 16
+batch_size = 32
 learning_rate = 5e-4
 curriculum = True
 augment=True
@@ -52,26 +52,27 @@ test_ds = SimpleDataset(ann_path, img_path, test, target_category, 360, 640)
 print('datasets created')
 
 # initializing dataloaders
+num_workers = 8
 train_loader = data.DataLoader(
     train_ds,
     batch_size=batch_size,
     shuffle=True,
     pin_memory=(device.type == "cuda"),
-    num_workers=2,
+    num_workers=num_workers,
 )
 valid_loader = data.DataLoader(
     valid_ds,
     batch_size=batch_size,
     shuffle=False,
     pin_memory=(device.type == "cuda"),
-    num_workers=2,
+    num_workers=num_workers,
 )
 test_loader = data.DataLoader(
     test_ds,
     batch_size=batch_size,
     shuffle=False,
     pin_memory=(device.type == "cuda"),
-    num_workers=2,
+    num_workers=num_workers,
 )
 print('dataloaders created')
 
