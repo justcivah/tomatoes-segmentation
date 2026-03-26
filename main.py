@@ -122,6 +122,8 @@ for m in models:
     hparams = {
         "model": model_name,
         "optimizer": optimizer.__class__.__name__,
+        "img_height": img_height,
+        "img_width": img_width,
         "loss_fn": loss_fn.__name__,
         "epochs": total_epochs,
         "learning_rate": learning_rate,
