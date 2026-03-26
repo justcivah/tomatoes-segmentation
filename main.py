@@ -1,11 +1,13 @@
-from models import SimpleCNN
+import models as md
 from dataset import SimpleDataset
 from trainer import SimpleTrainer
 import tools.utils as utils
 import torch.utils.data as data
 import torch.optim as optim
 import torch
+import mlflow
 from datetime import datetime
+from functools import partial
 import os
 
 
@@ -18,61 +20,149 @@ ann_path = os.path.join(ds_path, 'annotations.json')
 total_epochs = 10
 batch_size = 4
 learning_rate = 5e-4
+curriculum = True
+dropout = 0.25
+# 0 = tomatoes
+target_category = 0
 
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-checkpoint_path = os.path.join('models', timestamp) + '/'
+splits_path = os.path.join('models', timestamp)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'using {device} device')
 
 
 
-# setting random seed
-utils.set_seed()
-
 # splitting dataset into train, validation and test
-train, valid, test = utils.get_dataset_splits(checkpoint_path, ann_path, (0.8, 0.1, 0.1))
+train, valid, test = utils.get_dataset_splits(splits_path, ann_path, (0.8, 0.1, 0.1))
 print(f'train: {len(train)}, validation: {len(valid)}, test: {len(test)}')
 
-# initializing datasets
+# setting state
 state = {'current_epoch': 0, 'total_epochs': total_epochs}
-train_ds = SimpleDataset(ann_path, img_path, train, 0, 960, 540, state, augment=True, curriculum=True)
-valid_ds = SimpleDataset(ann_path, img_path, valid, 0, 960, 540)
-test_ds = SimpleDataset(ann_path, img_path, test, 0, 960, 540)
+state=state if curriculum else None
+
+# initializing datasets
+train_ds = SimpleDataset(ann_path, img_path, train, target_category, 960, 536, state, augment=True, curriculum=curriculum)
+valid_ds = SimpleDataset(ann_path, img_path, valid, target_category, 960, 536)
+test_ds = SimpleDataset(ann_path, img_path, test, target_category, 960, 536)
 print('datasets created')
 
 # initializing dataloaders
-train_loader = data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=(device.type == "cuda"), num_workers=4)
-valid_loader = data.DataLoader(valid_ds, batch_size=batch_size, shuffle=False, pin_memory=(device.type == "cuda"), num_workers=4)
-test_loader = data.DataLoader(valid_ds, batch_size=batch_size, shuffle=False, pin_memory=(device.type == "cuda"), num_workers=4)
+train_loader = data.DataLoader(
+    train_ds,
+    batch_size=batch_size,
+    shuffle=True,
+    pin_memory=(device.type == "cuda"),
+    num_workers=2,
+    persistent_workers=True,
+)
+valid_loader = data.DataLoader(
+    valid_ds,
+    batch_size=batch_size,
+    shuffle=False,
+    pin_memory=(device.type == "cuda"),
+    num_workers=2,
+    persistent_workers=True,
+)
+test_loader = data.DataLoader(
+    test_ds,
+    batch_size=batch_size,
+    shuffle=False,
+    pin_memory=(device.type == "cuda"),
+    num_workers=2,
+    persistent_workers=True,
+)
 print('dataloaders created')
 
 
 
-# initializing model
-model = SimpleCNN(in_channels=3).to(device)
+# multiple model train
+models = [
+    md.SimpleCNN,
+    md.CNN,
+    partial(md.DropoutCNN, dropout=dropout),
+    partial(md.Dropout2DCNN, dropout=dropout),
+    partial(md.EDPoolingCNN, dropout=dropout),
+    partial(md.DoubleEDPoolingCNN, dropout=dropout),
+    partial(md.EDStridingCNN, dropout=dropout),
+    partial(md.EDSplitStridingCNN, dropout=dropout),
+    partial(md.DoubleEDCNN, dropout=dropout),
+    partial(md.SkipDoubleEDCNN, dropout=dropout),
+    partial(md.SkipBothDoubleEDCNN, dropout=dropout),
+    partial(md.LightSkipBothDoubleEDCNN, dropout=dropout),
+    partial(md.LightFuseSkipBothDoubleEDCNN, dropout=dropout),
+]
 
 # initializing loss function
 loss_fn = utils.bce_dice_loss
 
-# initializing optimizer
-optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+# train all models
+for m in models:
+    # setting random seed for each model run
+    utils.set_seed(42)
 
-hparams={
-    "learning_rate": learning_rate,
-    "batch_size":    batch_size
-}
+    # initializing model
+    model = m(in_channels=3).to(device)
 
-# initializing trainer
-trainer = SimpleTrainer(model, test_loader, valid_loader, optimizer, loss_fn, total_epochs, experiment_name, checkpoint_path=checkpoint_path, hparams=hparams)
+    # initializing optimizer
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+    # setting hyperparameters log
+    model_class = m.func if isinstance(m, partial) else m
+    model_name  = model_class.__name__
+    dropout_val = m.keywords.get('dropout', None) if isinstance(m, partial) else None
+
+    hparams = {
+        "model": model_name,
+        "optimizer": optimizer.__class__.__name__,
+        "loss_fn": loss_fn.__name__,
+        "epochs": total_epochs,
+        "learning_rate": learning_rate,
+        "batch_size": batch_size,
+        "dropout": dropout_val,
+        "curriculum": curriculum,
+        "device": device,
+    }
+
+    run_name = f"{model_name}_{timestamp}"
+    checkpoint_path = os.path.join('models', timestamp, model_name)
+    # initializing trainer
+    trainer = SimpleTrainer(
+        model,
+        train_loader,
+        valid_loader,
+        optimizer,
+        loss_fn,
+        total_epochs,
+        state=state,
+        checkpoint_path=checkpoint_path,
+        hparams=hparams,
+    )
 
 
 
-# starting training
-print('starting training...')
-trainer.fit()
-print('training completed')
+    # starting training
 
-# computing testing loss
-test_loss = trainer.evaluate_metrics(train_loader)
-print(f'test loss: {test_loss}')
+    #setting up mlflow
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=run_name):
+        print(f'starting training for {model_name}...')
+        trainer.fit()
+        print('training completed')
+
+        # reloading best checkpoint before testing
+        best_ckpt = torch.load(os.path.join(checkpoint_path, 'best_model.pt'), weights_only=True)
+        model.load_state_dict(best_ckpt['model_state_dict'])
+
+        # computing testing loss
+        test_metrics = trainer.evaluate_metrics(test_loader)
+        print(f'test metrics: {test_metrics}')
+        # logging test metrics to mlflow
+        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items()})
+
+        # clearing objects and cache for next run
+        del model
+        del optimizer
+        del trainer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

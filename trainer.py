@@ -12,14 +12,14 @@ from torchmetrics.classification import (
 )
 
 class SimpleTrainer():
-    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, experiment_name, run_name=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
+    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, state=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
         self.model = model
         self.train_loader = train_loader
         self.valid_loader = valid_loader
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.epochs = epochs
-        self.experiment_name = experiment_name
+        self.state = state
         self.best_valid_loss = float('inf')
         self.metrics_threshold = metrics_threshold
         self.hparams = hparams or {}
@@ -34,16 +34,20 @@ class SimpleTrainer():
         os.makedirs(checkpoint_path, exist_ok=True)
         self.checkpoint_path = checkpoint_path
 
-        mlflow.set_experiment(experiment_name)
-        self.run_name = run_name
-
 
     def fit(self):
-        with mlflow.start_run(run_name=self.run_name) as run:
             self._log_hparams()
-            print(f"mlflow run id: {run.info.run_id}")
+
+            # setting epoch number for curriculum learning
+            if self.state is not None:
+                self.state["total_epochs"] = self.epochs
+                self.state["current_epoch"] = 0
 
             for epoch in range(self.epochs):
+                # setting epoch number for curriculum learning
+                if self.state is not None:
+                    self.state["current_epoch"] += 1
+
                 # training
                 self.model.train()
                 train_loss = self._train_one_epoch()
@@ -58,10 +62,10 @@ class SimpleTrainer():
                 val_loss = metrics["loss"]
                 if val_loss < self.best_valid_loss:
                     self.best_valid_loss = val_loss
-                    self._save_checkpoint(epoch, val_loss, self.checkpoint_path + 'best_model.pt')
+                    self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'best_model.pt'))
                     print(f'new best model saved with valid loss {val_loss:.4f}')
 
-            self._save_checkpoint(epoch, val_loss, self.checkpoint_path + 'last_model.pt')
+            self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'last_model.pt'))
 
 
     def evaluate_metrics(self, dataloader):
@@ -139,13 +143,7 @@ class SimpleTrainer():
 
 
     def _log_hparams(self):
-        base = {
-            "epochs":            self.epochs,
-            "metrics_threshold": self.metrics_threshold,
-            "device":            str(self.device),
-            "optimizer":         self.optimizer.__class__.__name__,
-        }
-
+        base = {"metrics_threshold": self.metrics_threshold}
         mlflow.log_params({**base, **self.hparams})
     
 
