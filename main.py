@@ -57,7 +57,6 @@ train_loader = data.DataLoader(
     shuffle=True,
     pin_memory=(device.type == "cuda"),
     num_workers=2,
-    persistent_workers=True,
 )
 valid_loader = data.DataLoader(
     valid_ds,
@@ -65,7 +64,6 @@ valid_loader = data.DataLoader(
     shuffle=False,
     pin_memory=(device.type == "cuda"),
     num_workers=2,
-    persistent_workers=True,
 )
 test_loader = data.DataLoader(
     test_ds,
@@ -73,7 +71,6 @@ test_loader = data.DataLoader(
     shuffle=False,
     pin_memory=(device.type == "cuda"),
     num_workers=2,
-    persistent_workers=True,
 )
 print('dataloaders created')
 
