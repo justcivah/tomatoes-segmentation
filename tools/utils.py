@@ -67,13 +67,23 @@ def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple 
     return train, valid, test
 
 
-def transformations(img, mask, width, height):
+import math
+
+def transformations(img, mask, t_height, t_width):
+    h, w = img.shape[-2:]
+
+    scale = max(t_width / w, t_height / h)
+    
+    # Use math.ceil to prevent truncation errors
+    n_height = math.ceil(h * scale)
+    n_width = math.ceil(w * scale)
+
     transform = T.Compose([
-        T.RandomCrop((width, height)),
+        T.Resize((n_height, n_width), antialias=True),
+        T.RandomCrop((t_height, t_width)),
     ])
 
     img, mask = transform(img, tv_tensors.Mask(mask))
-    
     return img, mask
 
 

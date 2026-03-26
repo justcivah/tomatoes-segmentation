@@ -17,13 +17,16 @@ experiment_name = 'tomatoes-segmentation'
 ds_path = '/home/giovanni/Desktop/agricultural-robotics/datasets/enhanced-tomato-greenhouse-dataset/'
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
-total_epochs = 10
+total_epochs = 500
 batch_size = 4
 learning_rate = 5e-4
 curriculum = True
+augment=True
 dropout = 0.25
 # 0 = tomatoes
 target_category = 0
+
+
 
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 splits_path = os.path.join('models', timestamp)
@@ -42,9 +45,9 @@ state = {'current_epoch': 0, 'total_epochs': total_epochs}
 state=state if curriculum else None
 
 # initializing datasets
-train_ds = SimpleDataset(ann_path, img_path, train, target_category, 960, 536, state, augment=True, curriculum=curriculum)
-valid_ds = SimpleDataset(ann_path, img_path, valid, target_category, 960, 536)
-test_ds = SimpleDataset(ann_path, img_path, test, target_category, 960, 536)
+train_ds = SimpleDataset(ann_path, img_path, train, target_category, 360, 640, state, augment=augment, curriculum=curriculum)
+valid_ds = SimpleDataset(ann_path, img_path, valid, target_category, 360, 640)
+test_ds = SimpleDataset(ann_path, img_path, test, target_category, 360, 640)
 print('datasets created')
 
 # initializing dataloaders
@@ -120,6 +123,7 @@ for m in models:
         "learning_rate": learning_rate,
         "batch_size": batch_size,
         "dropout": dropout_val,
+        "augment": augment,
         "curriculum": curriculum,
         "device": device,
     }

@@ -52,14 +52,14 @@ class SimpleDataset(data.Dataset):
         ValueError: If ``curriculum=True`` and ``state`` is ``None``.
     """
     
-    def __init__(self, ann_path: str, img_path: str, ids: list[int], cat: int, width: int, height: int, state: dict | None = None, augment: bool = False, curriculum: bool = False):
+    def __init__(self, ann_path: str, img_path: str, ids: list[int], cat: int, height: int, width: int, state: dict | None = None, augment: bool = False, curriculum: bool = False):
 
         self.ann_path = ann_path
         self.img_path = img_path
         self.ids = ids
         self.cat = cat
-        self.width = width
         self.height = height
+        self.width = width
         self.state = state
         self.augment = augment
         self.curriculum = curriculum
