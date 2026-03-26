@@ -96,6 +96,9 @@ models = [
 # initializing loss function
 loss_fn = utils.bce_dice_loss
 
+#setting up mlflow
+mlflow.set_experiment(experiment_name)
+
 # train all models
 for m in models:
     # setting random seed for each model run
@@ -127,6 +130,7 @@ for m in models:
 
     run_name = f"{model_name}_{timestamp}"
     checkpoint_path = os.path.join('models', timestamp, model_name)
+    os.makedirs(checkpoint_path, exist_ok=True)
     # initializing trainer
     trainer = SimpleTrainer(
         model,
@@ -143,9 +147,6 @@ for m in models:
 
 
     # starting training
-
-    #setting up mlflow
-    mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=run_name):
         print(f'starting training for {model_name}...')
         trainer.fit()
