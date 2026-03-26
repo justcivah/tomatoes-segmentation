@@ -13,7 +13,6 @@ import os
 
 
 # defining parameters
-experiment_name = 'tomatoes-segmentation'
 ds_path = '/home/giovanni/Desktop/agricultural-robotics/datasets/enhanced-tomato-greenhouse-dataset/'
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
@@ -31,6 +30,7 @@ target_category = 0
 
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 splits_path = os.path.join('models', timestamp)
+experiment_name = 'tomatoes-segmentation_' + timestamp
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'using {device} device')
@@ -97,11 +97,13 @@ models = [
 # initializing loss function
 loss_fn = utils.bce_dice_loss
 
+
+
 #setting up mlflow
 mlflow.set_experiment(experiment_name)
-
 # train all models
 for m in models:
+
     # setting random seed for each model run
     utils.set_seed(42)
 
@@ -130,7 +132,6 @@ for m in models:
         "device": str(device),
     }
 
-    run_name = f"{model_name}_{timestamp}"
     checkpoint_path = os.path.join('models', timestamp, model_name)
     os.makedirs(checkpoint_path, exist_ok=True)
     # initializing trainer
@@ -150,7 +151,7 @@ for m in models:
 
 
     # starting training
-    with mlflow.start_run(run_name=run_name):
+    with mlflow.start_run(run_name=model_name):
         print(f'starting training for {model_name}...')
         trainer.fit()
         print('training completed')
