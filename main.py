@@ -9,28 +9,29 @@ import mlflow
 from datetime import datetime
 from functools import partial
 import os
+from config import (
+    DS_PATH as ds_path,
+    EXPERIMENT_NAME as experiment_name,
+    TARGET_CATEGORY as target_category,
+    IMG_HEIGHT as img_height,
+    IMG_WIDTH as img_width,
+    NUM_WORKERS as num_workers,
+    TOTAL_EPOCHS as total_epochs,
+    BATCH_SIZE as batch_size,
+    LEARNING_RATE as learning_rate,
+    CURRICULUM as curriculum,
+    AUGMENT as augment,
+    DROPOUT as dropout,
+    PATIENCE as patience,
+)
 
 
-
-# defining parameters
-ds_path = '/home/giovanni/Desktop/agricultural-robotics/datasets/enhanced-tomato-greenhouse-dataset/'
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
-total_epochs = 500
-batch_size = 32
-learning_rate = 5e-4
-curriculum = True
-augment=True
-dropout = 0.25
-patience=50
-# 0 = tomatoes
-target_category = 0
-
-
 
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 splits_path = os.path.join('models', timestamp)
-experiment_name = 'tomatoes-segmentation_' + timestamp
+experiment_name = experiment_name + '_' + timestamp
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'using {device} device')
@@ -46,13 +47,12 @@ state = {'current_epoch': 0, 'total_epochs': total_epochs}
 state=state if curriculum else None
 
 # initializing datasets
-train_ds = SimpleDataset(ann_path, img_path, train, target_category, 360, 640, state, augment=augment, curriculum=curriculum)
-valid_ds = SimpleDataset(ann_path, img_path, valid, target_category, 360, 640)
-test_ds = SimpleDataset(ann_path, img_path, test, target_category, 360, 640)
+train_ds = SimpleDataset(ann_path, img_path, train, target_category, img_height, img_width, state, augment=augment, curriculum=curriculum)
+valid_ds = SimpleDataset(ann_path, img_path, valid, target_category, img_height, img_width)
+test_ds = SimpleDataset(ann_path, img_path, test, target_category, img_height, img_width)
 print('datasets created')
 
 # initializing dataloaders
-num_workers = 8
 train_loader = data.DataLoader(
     train_ds,
     batch_size=batch_size,
