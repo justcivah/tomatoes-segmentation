@@ -26,6 +26,23 @@ from config import (
 )
 
 
+
+# print config data
+print(f'ds_path: {ds_path}')
+print(f'experiment_name: {experiment_name}')
+print(f'img_height: {img_height}')
+print(f'img_width: {img_width}')
+print(f'num_workers: {num_workers}')
+print(f'total_epochs: {total_epochs}')
+print(f'batch_size: {batch_size}')
+print(f'learning_rate: {learning_rate}')
+print(f'curriculum: {curriculum}')
+print(f'augment: {augment}')
+print(f'dropout: {dropout}')
+print(f'patience: {patience}')
+
+
+
 img_path = os.path.join(ds_path, 'images')
 ann_path = os.path.join(ds_path, 'annotations.json')
 
@@ -80,6 +97,7 @@ print('dataloaders created')
 
 # multiple model train
 models = [
+    partial(md.SkipBothDoubleEDCNN, dropout=dropout),
     md.SimpleCNN,
     md.CNN,
     partial(md.DropoutCNN, dropout=dropout),
@@ -90,7 +108,6 @@ models = [
     partial(md.EDSplitStridingCNN, dropout=dropout),
     partial(md.DoubleEDCNN, dropout=dropout),
     partial(md.SkipDoubleEDCNN, dropout=dropout),
-    partial(md.SkipBothDoubleEDCNN, dropout=dropout),
     partial(md.LightSkipBothDoubleEDCNN, dropout=dropout),
     partial(md.LightFuseSkipBothDoubleEDCNN, dropout=dropout),
 ]
