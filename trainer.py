@@ -77,6 +77,7 @@ class SimpleTrainer():
 
                 if self.patience is not None:
                     if self.early_stop.stop(val_loss):
+                        print(f'early stopping. no improvements for {self.patience} epochs')
                         break
 
 
@@ -169,7 +170,7 @@ class SimpleTrainer():
                 "valid_loss":   metrics["loss"],
                 "valid_iou":    metrics["iou"],
                 "valid_dice":   metrics["dice"],
-                "valid_prec":   metrics["precision"],
+                "valid_precision":   metrics["precision"],
                 "valid_recall": metrics["recall"],
                 "valid_auroc":  metrics["auroc"],
                 "valid_ap":     metrics["avg_precision"],
