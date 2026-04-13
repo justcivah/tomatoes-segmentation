@@ -1,6 +1,6 @@
 from torch.utils import data
 from contextlib import redirect_stdout
-from PIL import Image
+from PIL import Image, ImageOps
 import tools.utils as utils
 from pycocotools.coco import COCO
 import torch
@@ -23,6 +23,9 @@ class SimpleDataset(data.Dataset):
         img_path (str): Root directory containing the image files. File names
             are resolved relative to this path using the ``file_name`` field
             stored in the COCO metadata.
+        msk_path (str): Root directory containing precompiled mask images. File
+            names are resolved relative to this path using the ``file_name``
+            field stored in the COCO metadata.
         ids (list[int]): Ordered list of COCO image IDs to expose as dataset
             samples. The dataset length and index mapping are derived from this
             list.
@@ -52,10 +55,11 @@ class SimpleDataset(data.Dataset):
         ValueError: If ``curriculum=True`` and ``state`` is ``None``.
     """
     
-    def __init__(self, ann_path: str, img_path: str, ids: list[int], cat: int, height: int, width: int, state: dict | None = None, augment: bool = False, curriculum: bool = False):
+    def __init__(self, ann_path: str, img_path: str, msk_path: str,ids: list[int], cat: int, height: int, width: int, state: dict | None = None, augment: bool = False, curriculum: bool = False):
 
         self.ann_path = ann_path
         self.img_path = img_path
+        self.msk_path = msk_path
         self.ids = ids
         self.cat = cat
         self.height = height
@@ -76,21 +80,17 @@ class SimpleDataset(data.Dataset):
 
     def __getitem__(self, index):
         img_id = self.ids[index]
-        ann_ids = self.coco.getAnnIds(img_id, self.cat)
-        ann = self.coco.loadAnns(ann_ids)
+        file_name = self.coco.imgs[img_id]['file_name']
 
-        img = Image.open(os.path.join(self.img_path, self.coco.imgs[img_id]['file_name']))
+        img = Image.open(os.path.join(self.img_path, file_name))
+        base_name = os.path.splitext(os.path.basename(file_name))[0]
+        mask_file_path = os.path.join(self.msk_path, f"{base_name}.png")
+        mask = Image.open(mask_file_path).convert('L')
 
-        # if there are no annotations for an image, create an all-zeros matrix
-        if len(ann) == 0:
-            h = self.coco.imgs[img_id]['height']
-            w = self.coco.imgs[img_id]['width']
-            mask = np.zeros((h, w), dtype=np.uint8)
-        else:
-            mask = sum(self.coco.annToMask(x) for x in ann)
-            mask = np.clip(mask, 0, 1)
+        mask = np.array(mask)
+        mask = np.clip(mask, 0, 1)
 
-        # convert image and mask to float32 torch tensors
+        # convert image and mask to uint8 torch tensors
         img = TF.to_image(img)
         img = TF.to_dtype(img, torch.uint8, scale=True)
 
@@ -102,6 +102,7 @@ class SimpleDataset(data.Dataset):
         if self.augment:
             img, mask = utils.augmentations(img, mask, self.height, self.width, self.state, self.curriculum)
 
+        # convert image and mask to float32 torch tensors
         img = TF.to_dtype(img, torch.float32, scale=True)
         mask = TF.to_dtype(mask, torch.float32, scale=False)
 

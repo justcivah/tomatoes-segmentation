@@ -1,3 +1,4 @@
+import os
 import model as md
 from dataset import SimpleDataset
 from trainer import SimpleTrainer
@@ -5,10 +6,7 @@ import tools.utils as utils
 import torch.utils.data as data
 import torch.optim as optim
 import torch
-import mlflow
-from datetime import datetime
 from functools import partial
-import os
 import gc
 from config import (
     DS_PATH as ds_path,
@@ -35,17 +33,8 @@ utils.set_seed(seed)
 
 # print config data
 print(f'ds_path: {ds_path}')
-print(f'experiment_name: {experiment_name}')
 print(f'img_height: {img_height}')
 print(f'img_width: {img_width}')
-print(f'num_workers: {num_workers}')
-print(f'total_epochs: {total_epochs}')
-print(f'batch_size: {batch_size}')
-print(f'learning_rate: {learning_rate}')
-print(f'curriculum: {curriculum}')
-print(f'augment: {augment}')
-print(f'dropout: {dropout}')
-print(f'patience: {patience}')
 
 
 
@@ -53,9 +42,8 @@ img_path = os.path.join(ds_path, 'images')
 msk_path = os.path.join(ds_path, 'masks')
 ann_path = os.path.join(ds_path, 'annotations.json')
 
-timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-#timestamp = '2026-03-27_19-57-30'
-splits_path = os.path.join('models', timestamp)
+timestamp = '2026-04-11_02-42-30'
+splits_path = os.path.join('../models', timestamp)
 experiment_name = experiment_name + '_' + timestamp
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -64,7 +52,7 @@ print(f'using {device} device')
 
 
 # splitting dataset into train, validation and test
-train, valid, test = utils.get_dataset_splits(splits_path, ann_path, (0.8, 0.1, 0.1))
+train, valid, test = utils.get_dataset_splits(splits_path, ann_path, (0.05, 0.05, 0.9))
 print(f'train: {len(train)}, validation: {len(valid)}, test: {len(test)}')
 
 # setting state
@@ -119,7 +107,7 @@ print('dataloaders created')
 
 # multiple model train
 models = [
-    partial(md.ToNet, dropout=dropout),
+    partial(md.YNet, dropout=dropout),
 ]
 
 # initializing loss function
@@ -127,8 +115,6 @@ loss_fn = utils.bce_dice_loss
 
 
 
-#setting up mlflow
-mlflow.set_experiment(experiment_name)
 # train all models
 for m in models:
     # setting random seed for each model run
@@ -162,7 +148,7 @@ for m in models:
         "device": str(device),
     }
 
-    checkpoint_path = os.path.join('models', timestamp, model_name)
+    checkpoint_path = os.path.join('models', '2026-04-11_02-42-30', model_name)
     os.makedirs(checkpoint_path, exist_ok=True)
     # initializing trainer
     trainer = SimpleTrainer(
@@ -177,32 +163,23 @@ for m in models:
         state=state,
         checkpoint_path=checkpoint_path,
         hparams=hparams,
-        metrics_threshold=0.5
     )
 
 
 
-    # starting training
-    with mlflow.start_run(run_name=model_name):
-        print(f'starting training for {model_name}...')
-        trainer.fit()
-        print('training completed')
+    # reloading best checkpoint before testing
+    best_ckpt = torch.load(os.path.join(checkpoint_path, 'best_model.pt'), weights_only=True, map_location='cpu')
+    model.load_state_dict(best_ckpt['model_state_dict'])
 
-        # reloading best checkpoint before testing
-        best_ckpt = torch.load(os.path.join(checkpoint_path, 'best_model.pt'), weights_only=True, map_location='cpu')
-        model.load_state_dict(best_ckpt['model_state_dict'])
+    # computing testing loss
+    test_metrics = trainer.evaluate_metrics(test_loader)
+    print(f'test metrics: {test_metrics}')
 
-        # computing testing loss
-        test_metrics = trainer.evaluate_metrics(test_loader)
-        print(f'test metrics: {test_metrics}')
-        # logging test metrics to mlflow
-        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items()})
-
-        # clearing objects and cache for next run
-        del model
-        del optimizer
-        del trainer
-        del best_ckpt
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
+    # clearing objects and cache for next run
+    del model
+    del optimizer
+    del trainer
+    del best_ckpt
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()

@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import mlflow
 import tools.utils as utils
+from torch.amp import autocast, GradScaler
 from torchmetrics.classification import (
     BinaryF1Score,
     BinaryPrecision,
@@ -13,7 +14,7 @@ from torchmetrics.classification import (
 )
 
 class SimpleTrainer():
-    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, patience=None, state=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
+    def __init__(self, model, train_loader, valid_loader, optimizer, loss_fn, epochs, patience=None, early_stop_start_epoch=None, state=None, checkpoint_path=None, metrics_threshold=0.5, hparams=None):
         self.model = model
         self.train_loader = train_loader
         self.valid_loader = valid_loader
@@ -21,6 +22,7 @@ class SimpleTrainer():
         self.loss_fn = loss_fn
         self.epochs = epochs
         self.patience = patience
+        self.early_stop_start_epoch = 0 if early_stop_start_epoch is None else early_stop_start_epoch
         self.state = state
         self.best_valid_loss = float('inf')
         self.metrics_threshold = metrics_threshold
@@ -28,11 +30,13 @@ class SimpleTrainer():
 
         if self.patience is not None:
             if not isinstance(self.patience, int) or self.patience <= 0:
-                raise ValueError("early_stop must be an integer > 0 or None")
-
+                raise ValueError("patience must be an integer > 0 or None")
+            
+        if not isinstance(self.early_stop_start_epoch, int) or self.early_stop_start_epoch < 0:
+            raise ValueError("early_stop_start_epoch must be an integer >= 0 or None")
 
         # infer device from model parameters
-        self.device = next(model.parameters()).device
+        self.device = str(next(model.parameters()).device)
 
         if checkpoint_path is None:
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -42,46 +46,49 @@ class SimpleTrainer():
         self.checkpoint_path = checkpoint_path
 
         if self.patience is not None:
-            self.early_stop = utils.EarlyStop(patience=self.patience)
+            self.early_stop = utils.EarlyStop(patience=self.patience, start_from_epoch=self.early_stop_start_epoch)
+
+        # setting up automatic mixed precision
+        self.scaler = GradScaler(enabled=('cuda' in self.device))
 
 
     def fit(self):
-            self._log_hparams()
+        self._log_hparams()
 
+        # setting epoch number for curriculum learning
+        if self.state is not None:
+            self.state["total_epochs"] = self.epochs
+            self.state["current_epoch"] = 0
+
+        for epoch in range(self.epochs):
             # setting epoch number for curriculum learning
             if self.state is not None:
-                self.state["total_epochs"] = self.epochs
-                self.state["current_epoch"] = 0
+                self.state["current_epoch"] += 1
 
-            for epoch in range(self.epochs):
-                # setting epoch number for curriculum learning
-                if self.state is not None:
-                    self.state["current_epoch"] += 1
+            # training
+            self.model.train()
+            train_loss = self._train_one_epoch()
 
-                # training
-                self.model.train()
-                train_loss = self._train_one_epoch()
+            # validation
+            self.model.eval()
+            metrics = self.evaluate_metrics(self.valid_loader)
 
-                # validation
-                self.model.eval()
-                metrics = self.evaluate_metrics(self.valid_loader)
+            self._print_metrics(epoch, train_loss, metrics)
+            self._log_epoch(epoch, train_loss, metrics)
 
-                self._print_metrics(epoch, train_loss, metrics)
-                self._log_epoch(epoch, train_loss, metrics)
+            val_loss = metrics["loss"]
+            if val_loss < self.best_valid_loss:
+                self.best_valid_loss = val_loss
+                self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'best_model.pt'))
+                print(f'new best model saved with valid loss {val_loss:.4f}')
 
-                val_loss = metrics["loss"]
-                if val_loss < self.best_valid_loss:
-                    self.best_valid_loss = val_loss
-                    self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'best_model.pt'))
-                    print(f'new best model saved with valid loss {val_loss:.4f}')
-
-                if self.patience is not None:
-                    if self.early_stop.stop(val_loss):
-                        print(f'early stopping. no improvements for {self.patience} epochs')
-                        break
+            if self.patience is not None:
+                if self.early_stop.stop(val_loss, epoch):
+                    print(f'early stopping. no improvements for {self.patience} epochs')
+                    break
 
 
-            self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'last_model.pt'))
+        self._save_checkpoint(epoch, val_loss, os.path.join(self.checkpoint_path, 'last_model.pt'))
 
 
     def evaluate_metrics(self, dataloader):
@@ -91,47 +98,47 @@ class SimpleTrainer():
 
         self.model.eval()
         with torch.no_grad():
-            for inputs, targets in dataloader:
-                inputs  = inputs.to(self.device)
-                targets = targets.to(self.device)
+            with autocast(device_type='cuda', enabled=('cuda' in self.device)):
+                for inputs, targets in dataloader:
+                    inputs  = inputs.to(self.device)
+                    targets = targets.to(self.device)
 
-                outputs = self.model(inputs)
-                loss = self.loss_fn(outputs, targets)
-                running_loss += loss.item()
-                total_batches += 1
+                    outputs = self.model(inputs)
+                    loss = self.loss_fn(outputs, targets)
+                    running_loss += loss.item()
+                    total_batches += 1
 
-                # converting into probabilities and then flattening to 1D
-                probs = torch.sigmoid(outputs).view(-1)
-                labels = targets.long().view(-1)
+                    # converting into probabilities and then flattening to 1D
+                    probs = torch.sigmoid(outputs).view(-1)
+                    labels = targets.long().view(-1)
 
-                preds = (probs >= self.metrics_threshold).long()
-                metrics["iou"].update(preds, labels)
-                metrics["dice"].update(preds, labels)
-                metrics["precision"].update(preds, labels)
-                metrics["recall"].update(preds, labels)
+                    metrics["iou"].update(probs, labels)
+                    metrics["dice"].update(probs, labels)
+                    metrics["precision"].update(probs, labels)
+                    metrics["recall"].update(probs, labels)
 
-                metrics["auroc"].update(probs, labels)
-                metrics["avg_precision"].update(probs, labels)
+                    metrics["auroc"].update(probs, labels)
+                    metrics["ap"].update(probs, labels)
 
         return {
-            "loss":          running_loss / total_batches,
-            "iou":           metrics["iou"].compute().item(),
-            "dice":          metrics["dice"].compute().item(),
-            "precision":     metrics["precision"].compute().item(),
-            "recall":        metrics["recall"].compute().item(),
-            "auroc":         metrics["auroc"].compute().item(),
-            "avg_precision": metrics["avg_precision"].compute().item(),
+            "loss": running_loss / total_batches,
+            "iou": metrics["iou"].compute().item(),
+            "dice": metrics["dice"].compute().item(),
+            "precision": metrics["precision"].compute().item(),
+            "recall": metrics["recall"].compute().item(),
+            "auroc": metrics["auroc"].compute().item(),
+            "ap": metrics["ap"].compute().item(),
         }
     
 
     def _build_metrics(self):
         return {
-            "iou":           BinaryJaccardIndex(threshold=self.metrics_threshold).to(self.device),
-            "dice":          BinaryF1Score(threshold=self.metrics_threshold).to(self.device),
-            "precision":     BinaryPrecision(threshold=self.metrics_threshold).to(self.device),
-            "recall":        BinaryRecall(threshold=self.metrics_threshold).to(self.device),
-            "auroc":         BinaryAUROC().to(self.device),
-            "avg_precision": BinaryAveragePrecision().to(self.device),
+            "iou": BinaryJaccardIndex(threshold=self.metrics_threshold).to(self.device),
+            "dice": BinaryF1Score(threshold=self.metrics_threshold).to(self.device),
+            "precision": BinaryPrecision(threshold=self.metrics_threshold).to(self.device),
+            "recall": BinaryRecall(threshold=self.metrics_threshold).to(self.device),
+            "auroc": BinaryAUROC().to(self.device),
+            "ap": BinaryAveragePrecision().to(self.device),
         }
 
     
@@ -143,12 +150,15 @@ class SimpleTrainer():
             inputs  = inputs.to(self.device)
             targets = targets.to(self.device)
         
-            self.optimizer.zero_grad()
-            outputs = self.model(inputs)
+            self.optimizer.zero_grad(set_to_none=True)
 
-            loss = self.loss_fn(outputs, targets)
-            loss.backward()
-            self.optimizer.step()
+            with autocast(device_type='cuda', enabled=('cuda' in self.device)):
+                outputs = self.model(inputs)
+                loss = self.loss_fn(outputs, targets)
+
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             running_loss += loss.item()
             total_batches += 1
@@ -166,14 +176,14 @@ class SimpleTrainer():
     def _log_epoch(self, epoch, train_loss, metrics):
         mlflow.log_metrics(
             {
-                "train_loss":   train_loss,
-                "valid_loss":   metrics["loss"],
-                "valid_iou":    metrics["iou"],
-                "valid_dice":   metrics["dice"],
-                "valid_precision":   metrics["precision"],
+                "train_loss": train_loss,
+                "valid_loss": metrics["loss"],
+                "valid_iou": metrics["iou"],
+                "valid_dice": metrics["dice"],
+                "valid_precision": metrics["precision"],
                 "valid_recall": metrics["recall"],
-                "valid_auroc":  metrics["auroc"],
-                "valid_ap":     metrics["avg_precision"],
+                "valid_auroc": metrics["auroc"],
+                "valid_ap": metrics["ap"],
             },
             step=epoch,
         )
@@ -181,8 +191,8 @@ class SimpleTrainer():
 
     def _save_checkpoint(self, epoch, val_loss, path):
         checkpoint = {
-            'epoch':            epoch,
-            'val_loss':         val_loss,
+            'epoch': epoch,
+            'val_loss': val_loss,
             'model_state_dict': self.model.state_dict(),
             'optim_state_dict': self.optimizer.state_dict(),
         }
@@ -200,5 +210,5 @@ class SimpleTrainer():
             f"precision: {metrics['precision']:.4f} | "
             f"recall: {metrics['recall']:.4f} | "
             f"auroc: {metrics['auroc']:.4f} | "
-            f"ap: {metrics['avg_precision']:.4f}"
+            f"ap: {metrics['ap']:.4f}"
         )

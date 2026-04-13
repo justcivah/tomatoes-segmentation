@@ -16,7 +16,6 @@ env/
 mlruns/
 mlflow.log
 mlflow-artifacts/
-mlflow.db
 
 # Distribution / packaging
 build/
@@ -33,3 +32,6 @@ dist/
 .idea/
 *.swp
 *.swo
+
+# Models
+models/*

@@ -2,6 +2,7 @@ import torchvision.transforms.v2 as T
 from torchvision import tv_tensors
 import torch.nn as nn
 import torch
+import math
 
 from contextlib import redirect_stdout
 from pycocotools.coco import COCO
@@ -18,6 +19,11 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple = (0, 0, 0)):
@@ -67,8 +73,6 @@ def get_dataset_splits(splits_output: str, annotations_path: str, splits: tuple 
     return train, valid, test
 
 
-import math
-
 def transformations(img, mask, t_height, t_width):
     h, w = img.shape[-2:]
 
@@ -91,17 +95,17 @@ def compute_augmentation_values(state, curriculum):
     config_dir = os.path.dirname(os.path.abspath(__file__))
 
     if curriculum:
-        with open(os.path.join(config_dir, 'augmentation_curriculum_config.json'), 'r') as f:
+        with open(os.path.join(config_dir, 'augmentation_curriculum_config_revision.json'), 'r') as f:
             config = json.load(f)
 
-        progress = state['current_epoch'] / state['total_epochs']
+        progress = min(state['current_epoch'] / (state['total_epochs'] * 0.8), 1)
         return {
             transform: {k: v['s'] + (v['e'] - v['s']) * progress for k, v in params.items()}
             for transform, params in config.items()
         }
     
     else:
-        with open(os.path.join(config_dir, 'augmentation_fixed_config.json'), 'r') as f:
+        with open(os.path.join(config_dir, 'augmentation_config.json'), 'r') as f:
             return json.load(f)
         
 
@@ -146,21 +150,26 @@ def bce_dice_loss(pred, target, alpha=0.5):
     return alpha * bce + (1 - alpha) * dice.mean()
 
 class EarlyStop():
-    def __init__(self, patience=20, delta=0.001):
+    def __init__(self, patience=20, start_from_epoch=0, delta=0.001):
         self.patience = patience
+        self.start_from_epoch = start_from_epoch
         self.delta = delta
         self.best_loss = float('inf')
         self.count = 0
 
-    def stop(self, loss):
-        if loss < self.best_loss - self.delta:
-            self.best_loss = loss
-            self.count = 0
+    def stop(self, loss, epoch):
+        if epoch >= self.start_from_epoch:
+            if loss < self.best_loss - self.delta:
+                self.best_loss = loss
+                self.count = 0
+            
+            else:
+                self.count += 1
+
+            if self.count > self.patience:
+                return True
+            
+            return False
         
         else:
-            self.count += 1
-
-        if self.count > self.patience:
-            return True
-        
-        return False
+            return False
